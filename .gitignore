@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+code_log.txt
+Banks.db
+Largest_banks_data.csv
+

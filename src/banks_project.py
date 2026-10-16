@@ -1,133 +1,104 @@
-import sqlite3
-from datetime import datetime as dt
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+import pandas as pd
+import sqlite3
+from datetime import datetime as dt
 
 
-def log_progress(message):
-    timestamp = dt.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("code_log.txt", "a", encoding="utf-8") as file:
-        file.write(f"{timestamp}: {message}\n")
+def log_progress(mensaje):
+    momento = dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("code_log.txt", "a") as archivo:
+        archivo.write(f"{momento}: {mensaje}\n")
 
 
-def extract(url, table_attribs=None):
+def extract(url):
     page = requests.get(url)
     soup = BeautifulSoup(page.text, "html.parser")
 
-    tables = soup.find_all("table")
-    bank_table = tables[0]
-    rows = bank_table.find_all("tr")
-    data = []
+    tablas = soup.find_all("table")
+    tabla_bancos = tablas[0]
 
-    if table_attribs is None:
-        table_attribs = ["Name", "MC_USD_Billion"]
+    filas = tabla_bancos.find_all("tr")
+    datos = []
 
-    for row in rows[1:]:
-        columns = row.find_all("td")
-        if len(columns) < 3:
-            continue
+    for banco in filas[1:]:
+        celda = banco.find_all("td")
+        nombre = celda[1].get_text(strip=True)
+        capitalizacion = float(celda[2].get_text(strip=True))
+        datos.append({"Name" : nombre, "MC_USD_Billion" : capitalizacion})
 
-        bank_name = columns[1].find_all("a")[1]["title"]
-        market_cap = columns[2].get_text(strip=True)
-        market_cap = market_cap.replace(",", "").replace("$", "")
-
-        data.append({
-            table_attribs[0]: bank_name,
-            table_attribs[1]: float(market_cap)
-        })
-
-    return pd.DataFrame(data, columns=table_attribs)
+    df = pd.DataFrame(datos)
+    return df
 
 
-def transform(df, csv_path):
-    exchange_rates = pd.read_csv(csv_path)
+def transform(df, ruta_tasas):
+    tabla = pd.read_csv(ruta_tasas)
 
-    gbp_rate = exchange_rates.loc[
-        exchange_rates["Currency"] == "GBP", "Rate"
-    ].item()
-    eur_rate = exchange_rates.loc[
-        exchange_rates["Currency"] == "EUR", "Rate"
-    ].item()
-    inr_rate = exchange_rates.loc[
-        exchange_rates["Currency"] == "INR", "Rate"
-    ].item()
+    tasa_gbp = tabla.loc[tabla["Currency"] == "GBP", "Rate"]
+    tasa_gbp = tasa_gbp.item()
+
+    tasa_eur = tabla.loc[tabla["Currency"] == "EUR", "Rate"]
+    tasa_eur = tasa_eur.item()
+
+    tasa_inr = tabla.loc[tabla["Currency"] == "INR", "Rate"]
+    tasa_inr = tasa_inr.item()
 
     df["MC_GBP_Billion"] = (
-        df["MC_USD_Billion"] * gbp_rate
+        df["MC_USD_Billion"] * tasa_gbp
     ).round(2)
+
     df["MC_EUR_Billion"] = (
-        df["MC_USD_Billion"] * eur_rate
+        df["MC_USD_Billion"] * tasa_eur
     ).round(2)
+
     df["MC_INR_Billion"] = (
-        df["MC_USD_Billion"] * inr_rate
+        df["MC_USD_Billion"] * tasa_inr
     ).round(2)
 
     return df
 
 
-def load_to_csv(df, output_path):
-    df.to_csv(output_path, index=False)
-    log_progress("Data loading process to CSV complete")
+def load_to_csv(df, ruta_salida):
+    df.to_csv(ruta_salida, index=False)
 
 
-def load_to_db(df, sql_connection, table_name):
+def load_to_db(df, conexion, nombre_tabla):
     df.to_sql(
-        table_name,
-        sql_connection,
-        if_exists="replace",
+        nombre_tabla,
+        conexion,
+        if_exists = "replace",
         index=False
     )
-    log_progress("Transformed dataframe loaded to SQL database Banks.db")
 
 
-def run_query(query_statement, sql_connection):
-    result = pd.read_sql_query(query_statement, sql_connection)
-    print(result)
-    log_progress(f"Query executed: {query_statement}")
+def run_queries(consulta, conexion):
+    resultado = pd.read_sql_query(consulta, conexion)
+    print(resultado)
 
 
-if __name__ == "__main__":
-    url = (
-        "https://web.archive.org/web/20230908091635/"
-        "https://en.wikipedia.org/wiki/List_of_largest_banks"
-    )
-    csv_path = (
-        "https://cf-courses-data.s3.us.cloud-object-storage.appdomain.cloud/"
-        "IBMSkillsNetwork-PY0221EN-Coursera/labs/v2/exchange_rate.csv"
-    )
-    output_path = "./Largest_banks_data.csv"
+url = 'https://web.archive.org/web/20230908091635/https://en.wikipedia.org/wiki/List_of_largest_banks'
 
-    log_progress("Preliminaries complete. Initiating ETL process")
+ruta_tasas = "https://cf-courses-data.s3.us.cloud-object-storage.appdomain.cloud/IBMSkillsNetwork-PY0221EN-Coursera/labs/v2/exchange_rate.csv"
 
-    df_banks = extract(url)
-    print(df_banks)
-    log_progress("Data extraction complete. Initiating transformation process")
+df_bancos = extract(url)
+log_progress("Data extraction complete. Initiating transformation process")
 
-    df_transformed = transform(df_banks, csv_path)
-    log_progress("Data transformation complete. Initiating loading process")
+df_transformado = transform(df_bancos, ruta_tasas)
+log_progress("Data transformation complete")
 
-    load_to_csv(df_transformed, output_path)
+load_to_csv(df_transformado,"./Largest_banks_data.csv")
+log_progress("Data loading process to CSV complete")
 
-    connection = sqlite3.connect("Banks.db")
-    log_progress("Connection made to Banks.db")
+conexion = sqlite3.connect("Banks.db")
+log_progress("Connection made to Banks.db")
 
-    load_to_db(df_transformed, connection, "Largest_banks")
+load_to_db(df_transformado, conexion, "Largest_banks")
+log_progress("Transformed dataframe loaded to sql database Banks.db")
 
-    run_query(
-        "SELECT Name, MC_GBP_Billion FROM Largest_banks",
-        connection
-    )
-    run_query(
-        "SELECT Name, MC_EUR_Billion FROM Largest_banks",
-        connection
-    )
-    run_query(
-        "SELECT Name, MC_INR_Billion FROM Largest_banks",
-        connection
-    )
+run_queries("SELECT name, MC_GBP_Billion FROM Largest_Banks", conexion)
+run_queries("SELECT name, MC_EUR_Billion FROM Largest_Banks", conexion)
+run_queries("SELECT name, MC_INR_Billion FROM Largest_Banks", conexion)
+log_progress("Queries executed successfully")
 
-    log_progress("Queries executed successfully")
-    connection.close()
-    log_progress("Database connection closed")
-
+conexion.close()
+log_progress("Database connection closed")
